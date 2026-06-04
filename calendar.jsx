@@ -14,7 +14,7 @@ const EVENT_TYPES = {
 const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const WEEK_ES = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
 
-function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTasks, events, setEvents, addAudit, showToast }) {
+function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTasks, events, setEvents, users, addAudit, showToast }) {
   const D = window.INDISA_DATA;
   const role = session.role;
   const readOnly = role === "viewer";
@@ -29,6 +29,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
 
   // Build unified events from projects + tasks + POA + custom
   const allEvents = useMemo(() => {
+    const myEmail = session.email?.toLowerCase();
     const out = [];
     // Projects
     const projList = effDept ? (projects[effDept] || []) : Object.values(projects).flat();
@@ -41,12 +42,16 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
       id: "t_" + t.id, type: "task", title: t.title, date: t.due_date, time: "",
       dept: t.department, refId: t.id, refType: "task", status: t.status,
     }));
-    // Custom events
-    (events || []).filter(e => !effDept || e.dept === effDept).forEach(e => out.push({
+    // Custom events — include own dept events + events where session user is a guest
+    (events || []).filter(e =>
+      !effDept ||
+      e.dept === effDept ||
+      (e.guests || []).some(g => g?.toLowerCase() === myEmail)
+    ).forEach(e => out.push({
       id: e.id, ...e, refType: "event",
     }));
     return out;
-  }, [projects, tasks, events, effDept]);
+  }, [projects, tasks, events, effDept, session.email]);
 
   const filtered = allEvents.filter(e => filter.kinds.includes(e.type));
 
@@ -340,7 +345,10 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
                           {(e.guests||[]).length > 0 && (
                             <div className="flex-c gap-4" style={{marginTop: 4, flexWrap: "wrap"}}>
                               <Icon name="users2" size={11} style={{color:"var(--text-3)"}}/>
-                              {e.guests.slice(0,3).map((g,i) => <span key={i} className="chip" style={{fontSize:10}}>{g}</span>)}
+                              {e.guests.slice(0,3).map((g,i) => {
+                                const u = (users||{})[g?.toLowerCase()];
+                                return <span key={i} className="chip" style={{fontSize:10}}>{u?.name || g}</span>;
+                              })}
                               {e.guests.length > 3 && <span className="dim" style={{fontSize:10}}>+{e.guests.length-3}</span>}
                             </div>
                           )}
@@ -373,7 +381,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
         </div>
       )}
 
-      {adding && <NewEventModal session={session} effDept={effDept} initialDate={adding?.date} projects={projects} tasks={tasks} onClose={() => setAdding(false)} onCreate={createEvent}/>}
+      {adding && <NewEventModal session={session} effDept={effDept} initialDate={adding?.date} projects={projects} tasks={tasks} users={users} onClose={() => setAdding(false)} onCreate={createEvent}/>}
 
       {deleteId && (
         <div className="modal-bg" onClick={() => setDeleteId(null)}>
@@ -395,7 +403,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
   );
 }
 
-function NewEventModal({ session, effDept, initialDate, projects, tasks, onClose, onCreate }) {
+function NewEventModal({ session, effDept, initialDate, projects, tasks, users, onClose, onCreate }) {
   const D = window.INDISA_DATA;
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
@@ -414,11 +422,22 @@ function NewEventModal({ session, effDept, initialDate, projects, tasks, onClose
   const allTasks = (tasks || []).filter(t => t.status !== "completed");
   const typeColor = EVENT_TYPES[type]?.color || "#666";
 
+  // System users available as guests (excluding self and already-added)
+  const systemUsers = Object.values(users || {}).filter(u =>
+    u.email && u.email.toLowerCase() !== session.email?.toLowerCase() && !guestList.includes(u.email.toLowerCase())
+  );
+  const hasSystemUsers = systemUsers.length > 0;
+
   function addGuest() {
     const g = guestInput.trim().replace(/,$/, "");
     if (!g || guestList.includes(g)) return;
     setGuestList(gl => [...gl, g]);
     setGuestInput("");
+  }
+
+  function addUserGuest(email) {
+    if (!email || guestList.includes(email.toLowerCase())) return;
+    setGuestList(gl => [...gl, email.toLowerCase()]);
   }
 
   function submit() {
@@ -498,20 +517,34 @@ function NewEventModal({ session, effDept, initialDate, projects, tasks, onClose
               <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 600, marginBottom: 10}}>
                 Invitados · {guestList.length}
               </div>
-              <div className="flex-c gap-8" style={{marginBottom: guestList.length ? 8 : 0}}>
-                <input className="input" placeholder="Nombre o correo (Enter para agregar)…" value={guestInput}
-                  onChange={e => setGuestInput(e.target.value)}
-                  onKeyDown={e => { if ((e.key === "Enter" || e.key === ",") && guestInput.trim()) { e.preventDefault(); addGuest(); } }}/>
-                <button className="btn" onClick={addGuest}><Icon name="plus" size={14}/></button>
-              </div>
+              {hasSystemUsers ? (
+                <div className="flex-c gap-8" style={{marginBottom: guestList.length ? 8 : 0}}>
+                  <select className="select" value="" onChange={e => { addUserGuest(e.target.value); e.target.value = ""; }}>
+                    <option value="">Seleccionar usuario del sistema…</option>
+                    {systemUsers.map(u => (
+                      <option key={u.email} value={u.email}>{u.name}{u.deptName ? ` — ${u.deptName}` : u.dept ? ` — ${u.dept}` : ""}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex-c gap-8" style={{marginBottom: guestList.length ? 8 : 0}}>
+                  <input className="input" placeholder="Nombre o correo (Enter para agregar)…" value={guestInput}
+                    onChange={e => setGuestInput(e.target.value)}
+                    onKeyDown={e => { if ((e.key === "Enter" || e.key === ",") && guestInput.trim()) { e.preventDefault(); addGuest(); } }}/>
+                  <button className="btn" onClick={addGuest}><Icon name="plus" size={14}/></button>
+                </div>
+              )}
               {guestList.length > 0 && (
                 <div className="flex-c" style={{flexWrap: "wrap", gap: 4}}>
-                  {guestList.map((g, i) => (
-                    <span key={i} className="chip" style={{cursor: "pointer"}} title="Clic para quitar"
-                      onClick={() => setGuestList(gl => gl.filter((_,j) => j !== i))}>
-                      {g} <span style={{marginLeft: 4, opacity: 0.5}}>×</span>
-                    </span>
-                  ))}
+                  {guestList.map((g, i) => {
+                    const u = (users||{})[g?.toLowerCase()];
+                    return (
+                      <span key={i} className="chip" style={{cursor: "pointer"}} title="Clic para quitar"
+                        onClick={() => setGuestList(gl => gl.filter((_,j) => j !== i))}>
+                        {u?.name || g} <span style={{marginLeft: 4, opacity: 0.5}}>×</span>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -534,7 +567,7 @@ function NewEventModal({ session, effDept, initialDate, projects, tasks, onClose
               )}
               {guestList.length > 0 && (
                 <div className="dim" style={{fontSize: 11, marginTop: 4}}>
-                  <Icon name="users2" size={11}/> {guestList.join(", ")}
+                  <Icon name="users2" size={11}/> {guestList.map(g => (users||{})[g?.toLowerCase()]?.name || g).join(", ")}
                 </div>
               )}
             </div>
