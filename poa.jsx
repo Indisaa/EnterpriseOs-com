@@ -448,7 +448,7 @@ function NewProjectInPOAModal({ session, deptId, isBhag, onClose, onCreate }) {
 
   function submit() {
     if (!title.trim()) return;
-    onCreate({ title: title.trim(), dept: targetDept, prio, status, due, tag: tag || "general", assignees: [initials(session.name)], targetDept });
+    onCreate({ title: title.trim(), dept: targetDept, prio, status, due, tag: tag || "general", assignees: [initials(session.name)], targetDept, from_poa: true });
   }
 
   return (
@@ -521,7 +521,7 @@ function NewKpiInPOAModal({ deptId, isBhag, curYear, curQuarter, onClose, onCrea
   function submit() {
     if (!canSubmit) return;
     const id = (label.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"").slice(0,15)||"kpi") + "_" + Date.now().toString(36).slice(-4);
-    onCreate({ id, label: label.trim(), tipo, metaSemanal: parseFloat(meta), semanas: Array(13).fill(null), acumuladoPrevio: parseFloat(acumPrev)||0, targetDept });
+    onCreate({ id, label: label.trim(), tipo, metaSemanal: parseFloat(meta), semanas: Array(13).fill(null), acumuladoPrevio: parseFloat(acumPrev)||0, targetDept, from_poa: true });
   }
 
   return (

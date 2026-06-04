@@ -405,15 +405,20 @@ function KPIPage({ session, deptScope, setDeptScope, kpis, setKpis, kpiWeekly, s
                       const c = compute(item);
                       const st = statusInfo(c.pct);
                       return (
-                        <tr key={dept.id + "_" + item.id} className="kpi-data-row">
+                        <tr key={dept.id + "_" + item.id} className="kpi-data-row" style={item.from_poa ? {background:"#7c3aed08",boxShadow:"inset 3px 0 0 #7c3aed"} : {}}>
                           <td className="kpi-td kpi-td-s1">
                             <span className="kpi-dept-pill" style={{ background: dept.color + "22", color: dept.color }}>
                               {dept.short}
                             </span>
                           </td>
                           <td className="kpi-td kpi-td-s2">
-                            <TextCell value={item.label} onCommit={v => updateLabel(dept.id, item.id, v)} readOnly={readOnly}
-                              style={{ fontWeight: 500, fontSize: 12, width: "100%" }} />
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              {item.from_poa && (
+                                <span style={{fontSize:9,fontWeight:800,background:"#7c3aed",color:"#fff",padding:"2px 5px",borderRadius:3,textTransform:"uppercase",letterSpacing:".07em",flexShrink:0,whiteSpace:"nowrap"}}>POA</span>
+                              )}
+                              <TextCell value={item.label} onCommit={v => updateLabel(dept.id, item.id, v)} readOnly={readOnly}
+                                style={{ fontWeight: 500, fontSize: 12, width: "100%" }} />
+                            </div>
                           </td>
                           <td className="kpi-td kpi-td-s3">
                             <span style={{ fontSize: 11, color: "var(--text-2)" }}>{item.tipo}</span>

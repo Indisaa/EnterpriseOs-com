@@ -183,6 +183,11 @@ function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTas
                       onDragStart={() => !readOnly && setDragId(p.id)}
                       onDragEnd={() => setDragId(null)}
                       onClick={() => setOpen(p)}>
+                      {p.from_poa && (
+                        <div style={{margin:"-10px -10px 8px",padding:"5px 10px",background:"linear-gradient(90deg,#7c3aed,#6d28d9)",borderRadius:"7px 7px 0 0",color:"#fff",fontSize:10,fontWeight:800,textTransform:"uppercase",letterSpacing:".09em",display:"flex",alignItems:"center",gap:5}}>
+                          <Icon name="flame" size={10}/> Plan Operativo Anual
+                        </div>
+                      )}
                       <div className="kcard__tag">
                         <span style={{display:"inline-block", width:6, height:6, borderRadius:2, background: (D.DEPT_BY_ID[p.dept]||{}).color || "#666"}}/>
                         {p.tag} · {D.DEPT_BY_ID[p.dept]?.short}
@@ -221,8 +226,11 @@ function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTas
             <thead><tr><th>Título</th><th>Depto</th><th>Estado</th><th>Prioridad</th><th>Etiqueta</th><th>Fecha</th><th>Equipo</th><th></th></tr></thead>
             <tbody>
               {filtered.map(p => (
-                <tr key={p.id} style={{cursor: "pointer"}}>
-                  <td onClick={() => setOpen(p)}>{p.title}</td>
+                <tr key={p.id} style={{cursor: "pointer", background: p.from_poa ? "#7c3aed08" : ""}}>
+                  <td onClick={() => setOpen(p)}>
+                    {p.from_poa && <span style={{fontSize:9,fontWeight:800,background:"#7c3aed",color:"#fff",padding:"2px 6px",borderRadius:3,textTransform:"uppercase",letterSpacing:".08em",marginRight:7,verticalAlign:"middle"}}>POA</span>}
+                    {p.title}
+                  </td>
                   <td className="dim" onClick={() => setOpen(p)}>{D.DEPT_BY_ID[p.dept]?.name}</td>
                   <td onClick={() => setOpen(p)}><StatusChip status={p.status}/></td>
                   <td onClick={() => setOpen(p)}><span className={"prio prio--" + p.prio}/> <span style={{textTransform: "capitalize", marginLeft: 6, fontSize: 12}}>{p.prio}</span></td>
@@ -637,6 +645,18 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
 
         {/* Scrollable body */}
         <div className="modal__bd" style={{overflowY: "auto", flex: 1}}>
+
+          {p.from_poa && (
+            <div style={{margin:"-18px -18px 16px",padding:"14px 18px",background:"linear-gradient(90deg,#7c3aed,#6d28d9)",color:"#fff",display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:36,height:36,borderRadius:"50%",background:"rgba(255,255,255,0.18)",display:"grid",placeItems:"center",flexShrink:0}}>
+                <Icon name="flame" size={18}/>
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,textTransform:"uppercase",letterSpacing:".10em"}}>Plan Operativo Anual</div>
+                <div style={{fontSize:11,opacity:0.85,marginTop:3}}>Este proyecto fue creado y vinculado desde el módulo POA · impacto estratégico</div>
+              </div>
+            </div>
+          )}
 
           <input className="input" style={{fontSize: 16, fontWeight: 500, padding: "8px 10px"}}
             value={title} onChange={e => setTitle(e.target.value)} onBlur={() => onSave({ title })} disabled={readOnly}/>
