@@ -34,7 +34,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
     const projList = effDept ? (projects[effDept] || []) : Object.values(projects).flat();
     projList.forEach(p => out.push({
       id: "p_" + p.id, type: "project", title: p.title, date: p.due, time: "",
-      dept: p.dept, refId: p.id, refType: "project",
+      dept: p.dept, refId: p.id, refType: "project", status: p.status,
     }));
     // Tasks
     (tasks || []).filter(t => !effDept || t.department === effDept).forEach(t => out.push({
@@ -62,7 +62,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
   function eventsForDay(d) {
     if (!d) return [];
     const ds = `${cursor.year}-${String(cursor.month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-    return filtered.filter(e => e.date === ds);
+    return filtered.filter(e => e.date === ds).sort((a, b) => (a.time || "").localeCompare(b.time || ""));
   }
 
   function nextMonth() { setCursor(c => c.month === 11 ? { year: c.year + 1, month: 0 } : { year: c.year, month: c.month + 1 }); }
@@ -75,6 +75,25 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
     addAudit({ action: `Evento creado: ${data.title}`, user: session.name, dept: data.dept, level: "success" });
     showToast("Evento agregado al calendario");
     setAdding(false);
+  }
+
+  function markDone(ev) {
+    if (ev.refType === "event") {
+      setEvents(prev => prev.map(e => e.id === ev.id ? { ...e, done: true } : e));
+      showToast("Evento marcado como completado");
+    } else if (ev.refType === "task") {
+      setTasks(prev => prev.map(t => t.id === ev.refId ? { ...t, status: "completed" } : t));
+      addAudit({ action: `Tarea completada desde calendario: ${ev.title}`, user: session.name, dept: ev.dept || "all", level: "success" });
+      showToast("Tarea completada");
+    } else if (ev.refType === "project") {
+      setProjects(prev => {
+        const out = { ...prev };
+        for (const did of Object.keys(out)) out[did] = out[did].map(p => p.id === ev.refId ? { ...p, status: "done" } : p);
+        return out;
+      });
+      addAudit({ action: `Proyecto completado desde calendario: ${ev.title}`, user: session.name, dept: ev.dept || "all", level: "success" });
+      showToast("Proyecto completado");
+    }
   }
 
   // deleteId is now the full event object so we know its source
@@ -103,6 +122,11 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
 
   // Quick stats
   const thisMonth = filtered.filter(e => e.date && e.date.startsWith(`${cursor.year}-${String(cursor.month+1).padStart(2,"0")}`));
+
+  // Derived from live filtered so status updates reflect immediately; sorted by time
+  const selDayEvs = selDay
+    ? [...filtered.filter(e => e.date === selDay.dateStr)].sort((a, b) => (a.time || "").localeCompare(b.time || ""))
+    : [];
 
   return (
     <div className="page">
@@ -165,7 +189,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
             const dateStr = d ? `${cursor.year}-${String(cursor.month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}` : null;
             return (
               <div key={i}
-                onClick={() => d && setSelDay({ d, evs, dateStr })}
+                onClick={() => d && setSelDay({ d, dateStr })}
                 style={{
                   minHeight: 110, padding: 8,
                   borderRight: ((i+1) % 7 !== 0) ? "1px solid var(--line)" : "none",
@@ -287,17 +311,21 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
               <button className="iconbtn" onClick={() => setSelDay(null)}><span className="ic"><Icon name="x" size={14}/></span></button>
             </div>
             <div className="modal__bd">
-              {selDay.evs.length === 0 ? (
+              {selDayEvs.length === 0 ? (
                 <div className="dim" style={{padding: 12, textAlign: "center"}}>No hay eventos este día.</div>
               ) : (
                 <div style={{display: "grid", gap: 8}}>
-                  {selDay.evs.map(e => {
+                  {selDayEvs.map(e => {
                     const type = EVENT_TYPES[e.type] || EVENT_TYPES.meeting;
+                    const isDone = e.done || e.status === "completed" || e.status === "done";
                     return (
-                      <div key={e.id} className="flex-c gap-10" style={{padding: 10, borderRadius: 8, border: "1px solid var(--line)", background: "var(--bg-1)"}}>
-                        <span style={{width: 6, height: 36, borderRadius: 3, background: type.color}}/>
+                      <div key={e.id} className="flex-c gap-10" style={{padding: 10, borderRadius: 8, border: "1px solid var(--line)", background: isDone ? "var(--bg-1)" : "var(--panel)", opacity: isDone ? 0.6 : 1}}>
+                        <span style={{width: 6, height: 36, borderRadius: 3, background: isDone ? "var(--positive)" : type.color}}/>
                         <div style={{flex: 1}}>
-                          <div style={{fontWeight: 500}}>{e.title}</div>
+                          <div style={{fontWeight: 500, textDecoration: isDone ? "line-through" : "none", display: "flex", alignItems: "center", gap: 6}}>
+                            {isDone && <Icon name="checkbox" size={13} style={{color: "var(--positive)", flexShrink: 0}}/>}
+                            {e.title}
+                          </div>
                           <div className="dim mono" style={{fontSize: 11, marginTop: 2}}>
                             {e.time ? (e.time_end ? `${e.time.slice(0,5)}–${e.time_end.slice(0,5)}` : e.time.slice(0,5)) + " · " : ""}
                             {type.label}{e.dept ? " · " + D.DEPT_BY_ID[e.dept]?.short : ""}
@@ -318,7 +346,16 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
                           )}
                         </div>
                         {!readOnly && (
-                          <button className="btn btn--sm btn--danger" onClick={() => setDeleteId(e)}><Icon name="x" size={11}/> Borrar</button>
+                          <div className="flex-c gap-4" style={{flexDirection: "column", alignItems: "flex-end"}}>
+                            {!isDone && (
+                              <button className="btn btn--sm" style={{background: "var(--positive)", color: "#fff", border: "none", whiteSpace: "nowrap"}}
+                                onClick={() => markDone(e)}>
+                                <Icon name="checkbox" size={11}/> Completar
+                              </button>
+                            )}
+                            {isDone && <span className="chip chip--ok" style={{fontSize: 10}}>Completado</span>}
+                            <button className="btn btn--sm btn--danger" onClick={() => setDeleteId(e)}><Icon name="x" size={11}/> Borrar</button>
+                          </div>
                         )}
                       </div>
                     );
