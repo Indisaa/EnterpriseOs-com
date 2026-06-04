@@ -233,7 +233,10 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
                     <span style={{width: 4, height: 28, borderRadius: 2, background: type.color}}/>
                     <div style={{flex: 1, minWidth: 0}}>
                       <div style={{fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>{e.title}</div>
-                      <div className="dim mono" style={{fontSize: 11}}>{e.date}{e.time ? " · " + e.time.slice(0,5) : ""}</div>
+                      <div className="dim mono" style={{fontSize: 11}}>
+                        {e.date}{e.time ? " · " + (e.time_end ? `${e.time.slice(0,5)}–${e.time_end.slice(0,5)}` : e.time.slice(0,5)) : ""}
+                        {(e.guests||[]).length > 0 ? ` · ${e.guests.length} inv.` : ""}
+                      </div>
                     </div>
                     <span className="chip" style={{fontSize: 10}}>{type.label}</span>
                   </div>
@@ -296,9 +299,23 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
                         <div style={{flex: 1}}>
                           <div style={{fontWeight: 500}}>{e.title}</div>
                           <div className="dim mono" style={{fontSize: 11, marginTop: 2}}>
-                            {e.time ? e.time + " · " : ""}{type.label}{e.dept ? " · " + D.DEPT_BY_ID[e.dept]?.short : ""}
+                            {e.time ? (e.time_end ? `${e.time.slice(0,5)}–${e.time_end.slice(0,5)}` : e.time.slice(0,5)) + " · " : ""}
+                            {type.label}{e.dept ? " · " + D.DEPT_BY_ID[e.dept]?.short : ""}
                             {e.refType === "project" ? " · proyecto" : e.refType === "task" ? " · tarea" : ""}
                           </div>
+                          {(e.linked_project || e.linked_task) && (
+                            <div className="flex-c gap-4" style={{marginTop: 4, flexWrap: "wrap"}}>
+                              {e.linked_project && <span className="chip chip--accent" style={{fontSize: 10}}><Icon name="board" size={9}/> {Object.values(projects||{}).flat().find(p=>p.id===e.linked_project)?.title || e.linked_project}</span>}
+                              {e.linked_task && <span className="chip" style={{fontSize: 10}}><Icon name="checkbox" size={9}/> {(tasks||[]).find(t=>t.id===e.linked_task)?.title || e.linked_task}</span>}
+                            </div>
+                          )}
+                          {(e.guests||[]).length > 0 && (
+                            <div className="flex-c gap-4" style={{marginTop: 4, flexWrap: "wrap"}}>
+                              <Icon name="users2" size={11} style={{color:"var(--text-3)"}}/>
+                              {e.guests.slice(0,3).map((g,i) => <span key={i} className="chip" style={{fontSize:10}}>{g}</span>)}
+                              {e.guests.length > 3 && <span className="dim" style={{fontSize:10}}>+{e.guests.length-3}</span>}
+                            </div>
+                          )}
                         </div>
                         {!readOnly && (
                           <button className="btn btn--sm btn--danger" onClick={() => setDeleteId(e)}><Icon name="x" size={11}/> Borrar</button>
@@ -319,7 +336,7 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
         </div>
       )}
 
-      {adding && <NewEventModal session={session} effDept={effDept} initialDate={adding?.date} onClose={() => setAdding(false)} onCreate={createEvent}/>}
+      {adding && <NewEventModal session={session} effDept={effDept} initialDate={adding?.date} projects={projects} tasks={tasks} onClose={() => setAdding(false)} onCreate={createEvent}/>}
 
       {deleteId && (
         <div className="modal-bg" onClick={() => setDeleteId(null)}>
@@ -341,32 +358,67 @@ function CalendarPage({ session, deptScope, projects, setProjects, tasks, setTas
   );
 }
 
-function NewEventModal({ session, effDept, initialDate, onClose, onCreate }) {
+function NewEventModal({ session, effDept, initialDate, projects, tasks, onClose, onCreate }) {
   const D = window.INDISA_DATA;
   const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
   const [date, setDate] = useState(initialDate || new Date().toISOString().slice(0, 10));
-  const [time, setTime] = useState("10:00");
+  const [timeStart, setTimeStart] = useState("09:00");
+  const [timeEnd, setTimeEnd] = useState("10:00");
   const [type, setType] = useState("meeting");
   const [dept, setDept] = useState(effDept || (session.dept || "gg"));
+  const [linkedProjectId, setLinkedProjectId] = useState("");
+  const [linkedTaskId, setLinkedTaskId] = useState("");
+  const [guestInput, setGuestInput] = useState("");
+  const [guestList, setGuestList] = useState([]);
+
+  const showGuests = ["meeting","kickoff","training","demo"].includes(type);
+  const allProjects = Object.values(projects || {}).flat().filter(p => p.status !== "done");
+  const allTasks = (tasks || []).filter(t => t.status !== "completed");
+  const typeColor = EVENT_TYPES[type]?.color || "#666";
+
+  function addGuest() {
+    const g = guestInput.trim().replace(/,$/, "");
+    if (!g || guestList.includes(g)) return;
+    setGuestList(gl => [...gl, g]);
+    setGuestInput("");
+  }
 
   function submit() {
     if (!title.trim()) return;
-    onCreate({ title: title.trim(), date, time, type, dept });
+    onCreate({
+      title: title.trim(), desc, date,
+      time: timeStart, time_end: timeEnd,
+      type, dept,
+      linked_project: linkedProjectId || null,
+      linked_task: linkedTaskId || null,
+      guests: guestList,
+    });
   }
 
+  const linkedProj = allProjects.find(p => p.id === linkedProjectId);
+  const linkedTask = allTasks.find(t => t.id === linkedTaskId);
+
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
+    <div className="modal-bg">
+      <div className="modal" style={{width: 560, maxHeight: "92vh", display: "flex", flexDirection: "column"}} onClick={e => e.stopPropagation()}>
         <div className="modal__hd">
           <div className="modal__title">Nuevo evento</div>
           <button className="iconbtn" onClick={onClose}><span className="ic"><Icon name="x" size={14}/></span></button>
         </div>
-        <div className="modal__bd">
+        <div className="modal__bd" style={{overflowY: "auto", flex: 1}}>
+
           <div className="field"><label>Título</label><input className="input" placeholder="Ej. Reunión semanal de operaciones" value={title} onChange={e => setTitle(e.target.value)} autoFocus/></div>
-          <div className="row row--2">
+          <div className="field"><label>Descripción / agenda (opcional)</label><textarea className="textarea input" style={{minHeight: 52, resize: "vertical"}} placeholder="Objetivos, agenda, contexto…" value={desc} onChange={e => setDesc(e.target.value)}/></div>
+
+          {/* Fecha + horas */}
+          <div className="row row--3">
             <div className="field"><label>Fecha</label><input className="input mono" type="date" value={date} onChange={e => setDate(e.target.value)}/></div>
-            <div className="field"><label>Hora</label><input className="input mono" type="time" value={time} onChange={e => setTime(e.target.value)}/></div>
+            <div className="field"><label>Hora inicio</label><input className="input mono" type="time" value={timeStart} onChange={e => setTimeStart(e.target.value)}/></div>
+            <div className="field"><label>Hora fin</label><input className="input mono" type="time" value={timeEnd} onChange={e => setTimeEnd(e.target.value)}/></div>
           </div>
+
+          {/* Tipo + Depto */}
           <div className="row row--2">
             <div className="field">
               <label>Tipo</label>
@@ -381,11 +433,73 @@ function NewEventModal({ session, effDept, initialDate, onClose, onCreate }) {
               </select>
             </div>
           </div>
-          <div style={{padding: 10, background: "var(--bg-1)", borderRadius: 8, display: "flex", alignItems: "center", gap: 10, marginTop: 4}}>
-            <span style={{width: 6, height: 28, borderRadius: 3, background: EVENT_TYPES[type].color}}/>
+
+          {/* Vincular */}
+          <div className="divider"/>
+          <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 600, marginBottom: 10}}>Vincular con</div>
+          <div className="row row--2">
+            <div className="field">
+              <label>Proyecto</label>
+              <select className="select" value={linkedProjectId} onChange={e => setLinkedProjectId(e.target.value)}>
+                <option value="">— sin proyecto —</option>
+                {allProjects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Tarea</label>
+              <select className="select" value={linkedTaskId} onChange={e => setLinkedTaskId(e.target.value)}>
+                <option value="">— sin tarea —</option>
+                {allTasks.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Invitados */}
+          {showGuests && (
+            <>
+              <div className="divider"/>
+              <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 600, marginBottom: 10}}>
+                Invitados · {guestList.length}
+              </div>
+              <div className="flex-c gap-8" style={{marginBottom: guestList.length ? 8 : 0}}>
+                <input className="input" placeholder="Nombre o correo (Enter para agregar)…" value={guestInput}
+                  onChange={e => setGuestInput(e.target.value)}
+                  onKeyDown={e => { if ((e.key === "Enter" || e.key === ",") && guestInput.trim()) { e.preventDefault(); addGuest(); } }}/>
+                <button className="btn" onClick={addGuest}><Icon name="plus" size={14}/></button>
+              </div>
+              {guestList.length > 0 && (
+                <div className="flex-c" style={{flexWrap: "wrap", gap: 4}}>
+                  {guestList.map((g, i) => (
+                    <span key={i} className="chip" style={{cursor: "pointer"}} title="Clic para quitar"
+                      onClick={() => setGuestList(gl => gl.filter((_,j) => j !== i))}>
+                      {g} <span style={{marginLeft: 4, opacity: 0.5}}>×</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Vista previa */}
+          <div className="divider"/>
+          <div style={{padding: 10, background: "var(--bg-1)", borderRadius: 8, display: "flex", alignItems: "flex-start", gap: 10}}>
+            <span style={{width: 6, minHeight: 36, borderRadius: 3, background: typeColor, marginTop: 2, flexShrink: 0}}/>
             <div style={{flex: 1}}>
-              <div style={{fontWeight: 500}}>{title || "Vista previa del evento"}</div>
-              <div className="dim mono" style={{fontSize: 11}}>{date} · {time} · {EVENT_TYPES[type].label}</div>
+              <div style={{fontWeight: 500, marginBottom: 3}}>{title || "Vista previa del evento"}</div>
+              <div className="dim mono" style={{fontSize: 11}}>
+                {date} · {timeStart}–{timeEnd} · {EVENT_TYPES[type].label}
+              </div>
+              {(linkedProj || linkedTask) && (
+                <div className="flex-c gap-4" style={{marginTop: 5, flexWrap: "wrap"}}>
+                  {linkedProj && <span className="chip chip--accent" style={{fontSize: 10}}><Icon name="board" size={9}/> {linkedProj.title}</span>}
+                  {linkedTask && <span className="chip" style={{fontSize: 10}}><Icon name="checkbox" size={9}/> {linkedTask.title}</span>}
+                </div>
+              )}
+              {guestList.length > 0 && (
+                <div className="dim" style={{fontSize: 11, marginTop: 4}}>
+                  <Icon name="users2" size={11}/> {guestList.join(", ")}
+                </div>
+              )}
             </div>
           </div>
         </div>
