@@ -39,7 +39,7 @@ function assigneeDisplay(assignedTo, users) {
   return assignedTo;
 }
 
-function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAudit, showToast }) {
+function TasksPage({ session, deptScope, tasks, setTasks, projects, users, setFiles, addAudit, showToast }) {
   const D = window.INDISA_DATA;
   const role = session.role;
   const readOnly = role === "viewer";
@@ -296,7 +296,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
         </Card>
       )}
 
-      {open && <TaskModal t={open} projects={projects} users={users} session={session} readOnly={readOnly} onClose={() => setOpen(null)}
+      {open && <TaskModal t={open} projects={projects} users={users} session={session} readOnly={readOnly} setFiles={setFiles} onClose={() => setOpen(null)}
         onSave={(patch) => { if (readOnly) return; updateTask(open.id, patch); setOpen({...open, ...patch}); }}
         onToggle={(cid) => {
           if (readOnly) return;
@@ -332,7 +332,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
   );
 }
 
-function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onAddCheck, onRemoveCheck, onDelete, readOnly }) {
+function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onAddCheck, onRemoveCheck, onDelete, readOnly, setFiles }) {
   const D = window.INDISA_DATA;
   const [title, setTitle] = useState(t.title);
   const [desc, setDesc] = useState(t.description || "");
@@ -374,6 +374,16 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
     const next = [...taskAtts, att];
     setTaskAtts(next);
     onSave({ attachments: next });
+    if (setFiles) {
+      setFiles(prev => [...prev, {
+        id: "f" + aid, name: file.name, kind: inferKindSimple(file.name),
+        size: file.size, dept: t.department,
+        uploadedBy: session?.name || "—",
+        uploadedAt: new Date().toISOString().slice(0, 10),
+        sharedWith: [], storagePath, confidential: false,
+        sourceType: "task", sourceId: t.id, sourceTitle: t.title,
+      }]);
+    }
     setAttUploading(false);
     e.target.value = "";
   }
@@ -395,6 +405,7 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
     const next = taskAtts.filter(x => x.id !== aid);
     setTaskAtts(next);
     onSave({ attachments: next });
+    if (setFiles) setFiles(prev => prev.filter(f => f.id !== "f" + aid));
   }
 
   // Find linked project

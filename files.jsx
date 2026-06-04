@@ -194,6 +194,12 @@ function FilesPage({ session, deptScope, files, setFiles, addAudit, showToast })
                   )}
                 </div>
                 <div style={{fontSize: 13, fontWeight: 500, lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical"}}>{f.name}</div>
+                {f.sourceType && (
+                  <div style={{fontSize: 10, color: "var(--text-3)", display:"flex", alignItems:"center", gap:3}}>
+                    <Icon name={f.sourceType === "task" ? "checkbox" : "board"} size={9}/>
+                    {f.sourceTitle || (f.sourceType === "task" ? "Tarea" : "Proyecto")}
+                  </div>
+                )}
                 <div className="dim" style={{fontSize: 11}}>
                   <div className="flex-c gap-6">
                     <span style={{width: 6, height: 6, borderRadius: 2, background: dept?.color}}/>
@@ -230,6 +236,7 @@ function FilesPage({ session, deptScope, files, setFiles, addAudit, showToast })
                         <span>
                           {f.name}
                           {f.confidential && <span className="chip chip--bad" style={{fontSize: 9, marginLeft: 8}}><Icon name="lock" size={10}/> Confidencial</span>}
+                          {f.sourceType && <span className="chip" style={{fontSize: 9, marginLeft: 8}}><Icon name={f.sourceType === "task" ? "checkbox" : "board"} size={9}/> {f.sourceTitle || (f.sourceType === "task" ? "Tarea" : "Proyecto")}</span>}
                         </span>
                       </div>
                     </td>

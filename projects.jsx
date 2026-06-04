@@ -26,7 +26,7 @@ const PROJ_TASK_STATUS = {
   completed:   { label: "Hecho",      chip: "chip--ok",    color: "var(--positive)" },
 };
 
-function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTasks, addAudit, showToast }) {
+function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTasks, setFiles, addAudit, showToast }) {
   const D = window.INDISA_DATA;
   const role = session.role;
   const readOnly = role === "viewer";
@@ -254,7 +254,7 @@ function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTas
         </Card>
       )}
 
-      {open && <ProjectModal p={open} readOnly={readOnly} session={session} tasks={tasks} setTasks={setTasks} addAudit={addAudit} showToast={showToast}
+      {open && <ProjectModal p={open} readOnly={readOnly} session={session} tasks={tasks} setTasks={setTasks} setFiles={setFiles} addAudit={addAudit} showToast={showToast}
         onClose={() => setOpen(null)}
         onSave={(patch) => { if (readOnly) return; updateProject(open.id, patch); setOpen({...open, ...patch}); }}
         onMove={(s) => { if (readOnly) return; moveProject(open.id, s); setOpen({...open, status: s}); }}
@@ -515,7 +515,7 @@ function Calendar({ items }) {
   );
 }
 
-function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, setTasks, session, addAudit, showToast }) {
+function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, setTasks, setFiles, session, addAudit, showToast }) {
   const D = window.INDISA_DATA;
   const [title, setTitle] = useState(p.title);
   const [description, setDescription] = useState(p.description || "");
@@ -584,6 +584,16 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
     const next = [...projAtts, att];
     setProjAtts(next);
     onSave({ attachments: next });
+    if (setFiles) {
+      setFiles(prev => [...prev, {
+        id: "f" + aid, name: file.name, kind: inferKindSimple(file.name),
+        size: file.size, dept: p.dept,
+        uploadedBy: session?.name || "—",
+        uploadedAt: new Date().toISOString().slice(0, 10),
+        sharedWith: [], storagePath, confidential: false,
+        sourceType: "project", sourceId: p.id, sourceTitle: p.title,
+      }]);
+    }
     setAttUploading(false);
     e.target.value = "";
   }
@@ -605,6 +615,7 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
     const next = projAtts.filter(x => x.id !== aid);
     setProjAtts(next);
     onSave({ attachments: next });
+    if (setFiles) setFiles(prev => prev.filter(f => f.id !== "f" + aid));
   }
 
   function submitNewTask() {
