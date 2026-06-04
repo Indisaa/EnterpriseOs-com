@@ -14,6 +14,24 @@ const TASK_PRIO = {
   critical: { label: "Crítica",  color: "#7c2d12",         cls: "prio--high" },
 };
 
+function inferKindSimple(name) {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  if (ext === "pdf") return "pdf";
+  if (["png","jpg","jpeg","gif","svg","webp"].includes(ext)) return "image";
+  if (["xlsx","xls","csv","ods"].includes(ext)) return "sheet";
+  if (["docx","doc","odt","txt"].includes(ext)) return "doc";
+  if (["pptx","ppt","key"].includes(ext)) return "slide";
+  return "other";
+}
+function fmtBytes(b) {
+  if (!b) return "—";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b/1024).toFixed(1) + " KB";
+  return (b/1048576).toFixed(1) + " MB";
+}
+const ATT_COLOR = { pdf:"#ef4444", image:"#8b5cf6", sheet:"#10b981", doc:"#2563eb", slide:"#f97316", other:"#6b7280" };
+const ATT_EXT   = { pdf:"PDF", image:"IMG", sheet:"XLS", doc:"DOC", slide:"PPT", other:"FILE" };
+
 function assigneeDisplay(assignedTo, users) {
   if (!assignedTo) return "—";
   const u = users?.[assignedTo.toLowerCase()];
@@ -76,7 +94,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
 
   function createTask(data) {
     const newId = "t" + Math.random().toString(36).slice(2,6);
-    const newTask = { id: newId, ...data, checklist: [] };
+    const newTask = { id: newId, ...data, checklist: [], notes: [], attachments: [] };
     setTasks(prev => [newTask, ...prev]);
     addAudit({ action: `Tarea creada: ${data.title}`, user: session.name, dept: data.department, level: "success" });
     showToast("Tarea creada");
@@ -320,8 +338,61 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
   const [due, setDue] = useState(t.due_date);
   const [assignee, setAssignee] = useState(t.assigned_to);
   const [newCheck, setNewCheck] = useState("");
+  const [linkedProjId, setLinkedProjId] = useState(t.project_id || "");
+  const [tNotes, setTNotes] = useState(t.notes || []);
+  const [noteInput, setNoteInput] = useState("");
+  const [taskAtts, setTaskAtts] = useState(t.attachments || []);
+  const [attUploading, setAttUploading] = useState(false);
+  const attRef = useRef();
   const checks = t.checklist.length;
   const done = t.checklist.filter(c => c.done).length;
+
+  function addNote() {
+    if (!noteInput.trim()) return;
+    const n = { user: initials(session?.name || "yo"), text: noteInput.trim(), ts: new Date().toLocaleString("es-CO", {dateStyle:"short", timeStyle:"short"}) };
+    const next = [...tNotes, n];
+    setTNotes(next);
+    onSave({ notes: next });
+    setNoteInput("");
+  }
+
+  async function handleAttach(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttUploading(true);
+    const aid = "a" + Math.random().toString(36).slice(2,6);
+    let storagePath = null;
+    if (window.SUPABASE_STORAGE) {
+      const path = `tareas/${t.id}/${aid}_${file.name}`;
+      const { error } = await window.SUPABASE_STORAGE.upload(path, file);
+      if (!error) storagePath = path;
+    }
+    const att = { id: aid, name: file.name, size: file.size, kind: inferKindSimple(file.name), storagePath, uploadedAt: new Date().toISOString().slice(0,10) };
+    const next = [...taskAtts, att];
+    setTaskAtts(next);
+    onSave({ attachments: next });
+    setAttUploading(false);
+    e.target.value = "";
+  }
+
+  async function downloadAtt(a) {
+    if (a.storagePath && window.SUPABASE_STORAGE) {
+      const url = await window.SUPABASE_STORAGE.getSignedUrl(a.storagePath);
+      if (url) { const el = document.createElement("a"); el.href = url; el.download = a.name; el.target = "_blank"; document.body.appendChild(el); el.click(); el.remove(); return; }
+    }
+    const blob = new Blob([a.name], {type:"text/plain"});
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a"); el.href = url; el.download = a.name; document.body.appendChild(el); el.click(); el.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function removeAtt(aid) {
+    const a = taskAtts.find(x => x.id === aid);
+    if (a?.storagePath && window.SUPABASE_STORAGE) await window.SUPABASE_STORAGE.remove(a.storagePath);
+    const next = taskAtts.filter(x => x.id !== aid);
+    setTaskAtts(next);
+    onSave({ attachments: next });
+  }
 
   // Find linked project
   const linkedProject = useMemo(() => {
@@ -333,7 +404,7 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" style={{width: 640}} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{width: 640, maxHeight: "92vh", display: "flex", flexDirection: "column"}} onClick={e => e.stopPropagation()}>
         <div className="modal__hd">
           <div className="flex-c gap-8">
             <span className={"chip " + statusInfo?.chip}><span className="dot"/>{statusInfo?.label}</span>
@@ -350,7 +421,7 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
             <button className="iconbtn" onClick={onClose}><span className="ic"><Icon name="x" size={14}/></span></button>
           </div>
         </div>
-        <div className="modal__bd">
+        <div className="modal__bd" style={{overflowY: "auto", flex: 1}}>
           <input className="input" style={{fontSize: 16, fontWeight: 500, padding: "8px 10px"}} value={title} onChange={e => setTitle(e.target.value)} onBlur={() => onSave({ title })} disabled={readOnly}/>
           {linkedProject && (
             <div className="flex-c gap-6" style={{marginTop: 8, padding: "6px 10px", borderRadius: 6, background: "var(--accent-soft)", border: "1px solid var(--accent-line)"}}>
@@ -378,14 +449,25 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
               </select>
             </div>
           </div>
-          <div className="field">
-            <label>Asignada a</label>
-            <select className="select" value={assignee} onChange={e => { setAssignee(e.target.value); onSave({ assigned_to: e.target.value }); }} disabled={readOnly}>
-              <option value="">— sin asignar —</option>
-              {Object.values(users || {}).filter(u => session?.role === "owner" || u.dept === t.department).sort((a,b) => (a.name||a.email).localeCompare(b.name||b.email)).map(u => (
-                <option key={u.email} value={u.email.toLowerCase()}>{u.name || u.email}</option>
-              ))}
-            </select>
+          <div className="row row--2">
+            <div className="field">
+              <label>Asignada a</label>
+              <select className="select" value={assignee} onChange={e => { setAssignee(e.target.value); onSave({ assigned_to: e.target.value }); }} disabled={readOnly}>
+                <option value="">— sin asignar —</option>
+                {Object.values(users || {}).filter(u => session?.role === "owner" || u.dept === t.department).sort((a,b) => (a.name||a.email).localeCompare(b.name||b.email)).map(u => (
+                  <option key={u.email} value={u.email.toLowerCase()}>{u.name || u.email}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>Proyecto vinculado</label>
+              <select className="select" value={linkedProjId} onChange={e => { setLinkedProjId(e.target.value); onSave({ project_id: e.target.value || null }); }} disabled={readOnly}>
+                <option value="">— sin proyecto —</option>
+                {Object.values(projects || {}).flat().filter(p => p.status !== "done").map(p => (
+                  <option key={p.id} value={p.id}>{p.title}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="divider"/>
           <div className="flex-c gap-10" style={{justifyContent: "space-between", marginBottom: 10}}>
@@ -410,6 +492,62 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
               onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheck(newCheck.trim()); setNewCheck(""); } }}/>
             <button className="btn" onClick={() => { if (newCheck.trim()) { onAddCheck(newCheck.trim()); setNewCheck(""); } }}><Icon name="plus" size={14}/></button>
           </div>}
+
+          {/* ─── NOTAS ─── */}
+          <div className="divider"/>
+          <div className="flex-c" style={{justifyContent:"space-between", marginBottom:10}}>
+            <div className="dim" style={{fontSize:11,textTransform:"uppercase",letterSpacing:".08em",fontWeight:600}}>Notas · {tNotes.length}</div>
+          </div>
+          <div style={{display:"grid",gap:6,marginBottom:8}}>
+            {tNotes.map((n,i) => (
+              <div key={i} className="flex-c gap-10" style={{padding:10,border:"1px solid var(--line)",borderRadius:8,background:"var(--bg-1)",alignItems:"flex-start"}}>
+                <span style={{width:22,height:22,borderRadius:"50%",background:"var(--bg-3)",display:"grid",placeItems:"center",fontSize:9,fontFamily:"var(--ff-mono)",flexShrink:0,fontWeight:600}}>{n.user}</span>
+                <div style={{flex:1}}><div style={{fontSize:13}}>{n.text}</div><div className="dim mono" style={{fontSize:10,marginTop:4}}>{n.ts}</div></div>
+              </div>
+            ))}
+            {tNotes.length === 0 && <div className="dim" style={{fontSize:12,padding:"4px 0"}}>Sin notas aún.</div>}
+          </div>
+          {!readOnly && (
+            <div className="flex-c gap-8">
+              <input className="input" placeholder="Agregar nota…" value={noteInput} onChange={e=>setNoteInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&noteInput.trim())addNote();}}/>
+              <button className="btn" onClick={addNote}><Icon name="arrow" size={14}/></button>
+            </div>
+          )}
+
+          {/* ─── DOCUMENTOS ─── */}
+          <div className="divider"/>
+          <div className="flex-c" style={{justifyContent:"space-between", marginBottom:10}}>
+            <div className="dim" style={{fontSize:11,textTransform:"uppercase",letterSpacing:".08em",fontWeight:600}}>Documentos · {taskAtts.length}</div>
+            {!readOnly && (
+              <>
+                <button className="btn btn--sm" onClick={()=>attRef.current?.click()} disabled={attUploading}>
+                  <Icon name="plus" size={12}/> {attUploading?"Subiendo…":"Adjuntar"}
+                </button>
+                <input ref={attRef} type="file" style={{display:"none"}} onChange={handleAttach}/>
+              </>
+            )}
+          </div>
+          {taskAtts.length > 0 ? (
+            <div style={{display:"grid",gap:6}}>
+              {taskAtts.map(a => {
+                const c = ATT_COLOR[a.kind]||ATT_COLOR.other;
+                const x = ATT_EXT[a.kind]||ATT_EXT.other;
+                return (
+                  <div key={a.id} className="flex-c gap-10" style={{padding:"8px 10px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg-1)"}}>
+                    <span style={{fontSize:9,fontFamily:"var(--ff-mono)",fontWeight:600,color:c,background:c+"18",padding:"3px 6px",borderRadius:4,flexShrink:0}}>{x}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
+                      <div className="dim mono" style={{fontSize:10}}>{fmtBytes(a.size)} · {a.uploadedAt}</div>
+                    </div>
+                    <button className="btn btn--sm" onClick={()=>downloadAtt(a)} title="Descargar"><Icon name="arrow" size={12}/></button>
+                    {!readOnly && <button style={{padding:"3px 5px",background:"transparent",border:"none",borderRadius:4,cursor:"pointer",color:"var(--text-2)"}} onClick={()=>removeAtt(a.id)} onMouseEnter={e=>e.currentTarget.style.color="var(--danger)"} onMouseLeave={e=>e.currentTarget.style.color="var(--text-2)"}><Icon name="x" size={12}/></button>}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="dim" style={{fontSize:12,padding:"4px 0"}}>Sin documentos adjuntos.</div>
+          )}
         </div>
         <div className="modal__ft">
           <button className="btn btn--ghost" onClick={onClose}>Cerrar</button>

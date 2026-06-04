@@ -1,6 +1,24 @@
 // Projects module: Kanban + Timeline + Calendar views
 const { useState, useEffect, useMemo, useRef } = React;
 
+function inferKindSimple(name) {
+  const ext = (name || "").split(".").pop().toLowerCase();
+  if (ext === "pdf") return "pdf";
+  if (["png","jpg","jpeg","gif","svg","webp"].includes(ext)) return "image";
+  if (["xlsx","xls","csv","ods"].includes(ext)) return "sheet";
+  if (["docx","doc","odt","txt"].includes(ext)) return "doc";
+  if (["pptx","ppt","key"].includes(ext)) return "slide";
+  return "other";
+}
+function fmtBytes(b) {
+  if (!b) return "—";
+  if (b < 1024) return b + " B";
+  if (b < 1048576) return (b/1024).toFixed(1) + " KB";
+  return (b/1048576).toFixed(1) + " MB";
+}
+const ATT_COLOR = { pdf:"#ef4444", image:"#8b5cf6", sheet:"#10b981", doc:"#2563eb", slide:"#f97316", other:"#6b7280" };
+const ATT_EXT   = { pdf:"PDF", image:"IMG", sheet:"XLS", doc:"DOC", slide:"PPT", other:"FILE" };
+
 const PROJ_TASK_STATUS = {
   pending:     { label: "Por hacer",  chip: "chip",        color: "var(--text-3)"   },
   in_progress: { label: "En curso",   chip: "chip--warn",  color: "var(--warning)"  },
@@ -59,7 +77,7 @@ function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTas
 
   function createProject(data) {
     const newId = "n" + Math.random().toString(36).slice(2, 6);
-    const np = { id: newId, ...data };
+    const np = { id: newId, ...data, description: data.description || "", notes: [], attachments: [] };
     setProjects(prev => ({ ...prev, [data.dept]: [...(prev[data.dept] || []), np] }));
     addAudit({ action: `Proyecto creado: ${data.title}`, user: session.name, dept: data.dept, level: "success" });
     showToast("Proyecto creado");
@@ -254,6 +272,7 @@ function NewProjectModal({ session, effDept, onClose, onCreate }) {
   const D = window.INDISA_DATA;
   const isAdmin = session.role === "admin";
   const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
   const [dept, setDept] = useState(isAdmin ? session.dept : (effDept || "ing"));
   const [prio, setPrio] = useState("med");
   const [status, setStatus] = useState("todo");
@@ -262,7 +281,7 @@ function NewProjectModal({ session, effDept, onClose, onCreate }) {
 
   function submit() {
     if (!title.trim()) return;
-    onCreate({ title: title.trim(), dept, prio, status, due, tag: tag || "general", assignees: [initials(session.name)] });
+    onCreate({ title: title.trim(), description: desc, dept, prio, status, due, tag: tag || "general", assignees: [initials(session.name)] });
   }
 
   return (
@@ -274,6 +293,7 @@ function NewProjectModal({ session, effDept, onClose, onCreate }) {
         </div>
         <div className="modal__bd">
           <div className="field"><label>Título del proyecto</label><input className="input" placeholder="Ej. Rediseño del portal web" value={title} onChange={e => setTitle(e.target.value)} autoFocus/></div>
+          <div className="field"><label>Descripción (opcional)</label><textarea className="textarea input" style={{minHeight:60}} placeholder="Descripción o contexto del proyecto…" value={desc} onChange={e=>setDesc(e.target.value)}/></div>
           <div className="row row--2">
             <div className="field">
               <label>Departamento</label>
@@ -486,12 +506,15 @@ function Calendar({ items }) {
 function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, setTasks, session, addAudit, showToast }) {
   const D = window.INDISA_DATA;
   const [title, setTitle] = useState(p.title);
+  const [description, setDescription] = useState(p.description || "");
+  const [tag, setTag] = useState(p.tag || "");
   const [prio, setPrio] = useState(p.prio);
   const [due, setDue] = useState(p.due);
   const [note, setNote] = useState("");
-  const [notes, setNotes] = useState([
-    { user: "AM", text: "PoC del proveedor confirmado para el próximo sprint.", ts: "Ayer" },
-  ]);
+  const [notes, setNotes] = useState(p.notes || []);
+  const [projAtts, setProjAtts] = useState(p.attachments || []);
+  const [attUploading, setAttUploading] = useState(false);
+  const attRef = useRef();
   const initialBudget = (D.PROJECT_BUDGETS || {})[p.id] || { budget: 0, spent: 0 };
   const [budget, setBudget] = useState(p.budget != null ? p.budget : initialBudget.budget);
   const [spent, setSpent]   = useState(p.spent  != null ? p.spent  : initialBudget.spent);
@@ -534,6 +557,44 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
     addAudit?.({ action: `Tarea eliminada del proyecto: ${taskTitle}`, user: session?.name || "—", dept: p.dept, level: "warn" });
     showToast?.("Tarea eliminada");
   }
+  async function handleAttach(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAttUploading(true);
+    const aid = "a" + Math.random().toString(36).slice(2,6);
+    let storagePath = null;
+    if (window.SUPABASE_STORAGE) {
+      const path = `proyectos/${p.id}/${aid}_${file.name}`;
+      const { error } = await window.SUPABASE_STORAGE.upload(path, file);
+      if (!error) storagePath = path;
+    }
+    const att = { id: aid, name: file.name, size: file.size, kind: inferKindSimple(file.name), storagePath, uploadedAt: new Date().toISOString().slice(0,10) };
+    const next = [...projAtts, att];
+    setProjAtts(next);
+    onSave({ attachments: next });
+    setAttUploading(false);
+    e.target.value = "";
+  }
+
+  async function downloadAtt(a) {
+    if (a.storagePath && window.SUPABASE_STORAGE) {
+      const url = await window.SUPABASE_STORAGE.getSignedUrl(a.storagePath);
+      if (url) { const el = document.createElement("a"); el.href = url; el.download = a.name; el.target = "_blank"; document.body.appendChild(el); el.click(); el.remove(); return; }
+    }
+    const blob = new Blob([a.name], {type:"text/plain"});
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a"); el.href = url; el.download = a.name; document.body.appendChild(el); el.click(); el.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function removeAtt(aid) {
+    const a = projAtts.find(x => x.id === aid);
+    if (a?.storagePath && window.SUPABASE_STORAGE) await window.SUPABASE_STORAGE.remove(a.storagePath);
+    const next = projAtts.filter(x => x.id !== aid);
+    setProjAtts(next);
+    onSave({ attachments: next });
+  }
+
   function submitNewTask() {
     if (!newTaskTitle.trim()) return;
     const newId = "t" + Math.random().toString(36).slice(2, 6);
@@ -580,7 +641,10 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
           <input className="input" style={{fontSize: 16, fontWeight: 500, padding: "8px 10px"}}
             value={title} onChange={e => setTitle(e.target.value)} onBlur={() => onSave({ title })} disabled={readOnly}/>
 
-          <div className="row row--2" style={{marginTop: 14}}>
+          <textarea className="textarea input" style={{marginTop:10, minHeight:58, resize:"vertical"}} placeholder="Descripción del proyecto…"
+            value={description} onChange={e=>setDescription(e.target.value)} onBlur={()=>onSave({description})} disabled={readOnly}/>
+
+          <div className="row row--3" style={{marginTop: 14}}>
             <div className="field">
               <label>Prioridad</label>
               <select className="select" value={prio} onChange={e => { setPrio(e.target.value); onSave({ prio: e.target.value }); }} disabled={readOnly}>
@@ -592,6 +656,10 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
             <div className="field">
               <label>Fecha límite</label>
               <input className="input mono" type="date" value={due} onChange={e => { setDue(e.target.value); onSave({ due: e.target.value }); }} disabled={readOnly}/>
+            </div>
+            <div className="field">
+              <label>Etiqueta</label>
+              <input className="input" placeholder="Ej. diseño, ops" value={tag} onChange={e=>setTag(e.target.value)} onBlur={()=>onSave({tag})} disabled={readOnly}/>
             </div>
           </div>
 
@@ -778,9 +846,9 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
             </div>
           </div>
 
-          {/* ─── COMMENTS ─── */}
+          {/* ─── NOTAS ─── */}
           <div className="flex-c gap-10" style={{justifyContent: "space-between", marginBottom: 10}}>
-            <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em"}}>Comentarios · {notes.length}</div>
+            <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 600}}>Notas · {notes.length}</div>
             <div className="flex-c gap-8"><Avatars list={p.assignees}/></div>
           </div>
           <div style={{display: "grid", gap: 8}}>
@@ -794,16 +862,52 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
               </div>
             ))}
             <div className="flex-c gap-8">
-              <input className="input" placeholder="Escribe un comentario…" value={note} onChange={e => setNote(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && note.trim()) { setNotes([...notes, { user: initials(session?.name || "yo"), text: note, ts: "ahora" }]); setNote(""); } }}/>
-              <button className="btn" onClick={() => { if (note.trim()) { setNotes([...notes, { user: initials(session?.name || "yo"), text: note, ts: "ahora" }]); setNote(""); } }}><Icon name="arrow" size={14}/></button>
+              <input className="input" placeholder="Agregar nota…" value={note} onChange={e => setNote(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && note.trim()) { const next=[...notes,{user:initials(session?.name||"yo"),text:note,ts:new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"})}]; setNotes(next); onSave({notes:next}); setNote(""); } }}/>
+              <button className="btn" onClick={() => { if (note.trim()) { const next=[...notes,{user:initials(session?.name||"yo"),text:note,ts:new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"})}]; setNotes(next); onSave({notes:next}); setNote(""); } }}><Icon name="arrow" size={14}/></button>
             </div>
           </div>
         </div>
 
+          {/* ─── DOCUMENTOS ADJUNTOS ─── */}
+          <div className="divider"/>
+          <div className="flex-c" style={{justifyContent:"space-between", marginBottom:10}}>
+            <div className="dim" style={{fontSize:11,textTransform:"uppercase",letterSpacing:".08em",fontWeight:600}}>Documentos · {projAtts.length}</div>
+            {!readOnly && (
+              <>
+                <button className="btn btn--sm" onClick={()=>attRef.current?.click()} disabled={attUploading}>
+                  <Icon name="plus" size={12}/> {attUploading?"Subiendo…":"Adjuntar"}
+                </button>
+                <input ref={attRef} type="file" style={{display:"none"}} onChange={handleAttach}/>
+              </>
+            )}
+          </div>
+          {projAtts.length > 0 ? (
+            <div style={{display:"grid",gap:6}}>
+              {projAtts.map(a => {
+                const c = ATT_COLOR[a.kind]||ATT_COLOR.other;
+                const x = ATT_EXT[a.kind]||ATT_EXT.other;
+                return (
+                  <div key={a.id} className="flex-c gap-10" style={{padding:"8px 10px",border:"1px solid var(--line)",borderRadius:8,background:"var(--bg-1)"}}>
+                    <span style={{fontSize:9,fontFamily:"var(--ff-mono)",fontWeight:600,color:c,background:c+"18",padding:"3px 6px",borderRadius:4,flexShrink:0}}>{x}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
+                      <div className="dim mono" style={{fontSize:10}}>{fmtBytes(a.size)} · {a.uploadedAt}</div>
+                    </div>
+                    <button className="btn btn--sm" onClick={()=>downloadAtt(a)} title="Descargar"><Icon name="arrow" size={12}/></button>
+                    {!readOnly && <button style={{padding:"3px 5px",background:"transparent",border:"none",borderRadius:4,cursor:"pointer",color:"var(--text-2)"}} onClick={()=>removeAtt(a.id)} onMouseEnter={e=>e.currentTarget.style.color="var(--danger)"} onMouseLeave={e=>e.currentTarget.style.color="var(--text-2)"}><Icon name="x" size={12}/></button>}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="dim" style={{fontSize:12,padding:"4px 0"}}>Sin documentos adjuntos.</div>
+          )}
+        </div>
+
         <div className="modal__ft">
           <button className="btn btn--ghost" onClick={onClose}>Cerrar</button>
-          {!readOnly && <button className="btn btn--primary" onClick={() => { onSave({ title }); onClose(); }}>Guardar cambios</button>}
+          {!readOnly && <button className="btn btn--primary" onClick={() => { onSave({ title, description, tag }); onClose(); }}>Guardar cambios</button>}
         </div>
       </div>
     </div>
