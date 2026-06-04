@@ -80,11 +80,13 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
     }));
   }
 
-  function addChecklist(tid, text) {
+  function addChecklist(tid, item) {
     setTasks(prev => prev.map(t => {
       if (t.id !== tid) return t;
       const cid = "c" + Math.random().toString(36).slice(2,5);
-      return { ...t, checklist: [...t.checklist, { id: cid, text, done: false }] };
+      const text = typeof item === "string" ? item : item.text;
+      const due_date = typeof item === "object" ? (item.due_date || null) : null;
+      return { ...t, checklist: [...t.checklist, { id: cid, text, done: false, due_date }] };
     }));
   }
 
@@ -242,7 +244,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
       {view === "list" && (
         <Card title="Todas las tareas" sub={`${filtered.length} filas`}>
           <table className="table">
-            <thead><tr><th>Título</th><th>Depto</th><th>Estado</th><th>Prio</th><th>Asignada</th><th>Fecha</th><th>Checklist</th><th></th></tr></thead>
+            <thead><tr><th>Título</th><th>Depto</th><th>Estado</th><th>Prio</th><th>Asignada</th><th>Fecha</th><th>Subtareas</th><th></th></tr></thead>
             <tbody>
               {filtered.map(t => {
                 const checks = t.checklist.length;
@@ -270,7 +272,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
       {view === "mine" && (
         <Card title={`Asignadas a mí`} sub={session.name}>
           <table className="table">
-            <thead><tr><th>Título</th><th>Depto</th><th>Estado</th><th>Prio</th><th>Fecha</th><th>Checklist</th></tr></thead>
+            <thead><tr><th>Título</th><th>Depto</th><th>Estado</th><th>Prio</th><th>Fecha</th><th>Subtareas</th></tr></thead>
             <tbody>
               {filtered.filter(t => t.assigned_to === session.email?.toLowerCase() || t.assigned_to === initials(session.name)).map(t => {
                 const checks = t.checklist.length;
@@ -308,7 +310,7 @@ function TasksPage({ session, deptScope, tasks, setTasks, projects, users, addAu
             return {...prev, checklist, status};
           });
         }}
-        onAddCheck={(text) => { if (readOnly) return; addChecklist(open.id, text); setOpen(prev => ({...prev, checklist: [...prev.checklist, {id:"c"+Math.random().toString(36).slice(2,5), text, done: false}]})); }}
+        onAddCheck={(item) => { if (readOnly) return; addChecklist(open.id, item); const text = typeof item === "string" ? item : item.text; const due_date = typeof item === "object" ? (item.due_date || null) : null; setOpen(prev => ({...prev, checklist: [...prev.checklist, {id:"c"+Math.random().toString(36).slice(2,5), text, done: false, due_date}]})); }}
         onRemoveCheck={(cid) => { if (readOnly) return; removeChecklist(open.id, cid); setOpen(prev => ({...prev, checklist: prev.checklist.filter(c => c.id !== cid)})); }}
         onDelete={() => { setDeleteId(open.id); setOpen(null); }}/>}
 
@@ -338,6 +340,7 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
   const [due, setDue] = useState(t.due_date);
   const [assignee, setAssignee] = useState(t.assigned_to);
   const [newCheck, setNewCheck] = useState("");
+  const [newCheckDue, setNewCheckDue] = useState("");
   const [linkedProjId, setLinkedProjId] = useState(t.project_id || "");
   const [tNotes, setTNotes] = useState(t.notes || []);
   const [noteInput, setNoteInput] = useState("");
@@ -471,7 +474,7 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
           </div>
           <div className="divider"/>
           <div className="flex-c gap-10" style={{justifyContent: "space-between", marginBottom: 10}}>
-            <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em"}}>Checklist · {done}/{checks}</div>
+            <div className="dim" style={{fontSize: 11, textTransform: "uppercase", letterSpacing: ".08em"}}>Subtareas · {done}/{checks}</div>
             {checks > 0 && (
               <div className="deptperf__bar" style={{flex: 1, marginLeft: 12, maxWidth: 200}}>
                 <span style={{width: (checks ? done/checks*100 : 0) + "%", background: "var(--positive)", transition: "width .3s ease"}}/>
@@ -479,19 +482,37 @@ function TaskModal({ t, projects, users, session, onClose, onSave, onToggle, onA
             )}
           </div>
           <div style={{display: "grid", gap: 4, marginBottom: 8}}>
-            {t.checklist.map(c => (
-              <div key={c.id} className="goal__obj" style={{gridTemplateColumns: "auto 1fr auto"}}>
-                <input type="checkbox" checked={c.done} onChange={() => onToggle(c.id)} disabled={readOnly} style={{accentColor: "var(--accent)"}}/>
-                <span style={{textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--text-2)" : "var(--text)"}}>{c.text}</span>
-                {!readOnly && <button className="btn btn--sm" style={{color: "var(--danger)", border: "none", background: "transparent", padding: "2px 4px"}} onClick={() => onRemoveCheck(c.id)}><Icon name="x" size={11}/></button>}
-              </div>
-            ))}
+            {t.checklist.map(c => {
+              const isOverdueItem = c.due_date && !c.done && new Date(c.due_date) < new Date();
+              return (
+                <div key={c.id} className="goal__obj" style={{gridTemplateColumns: "auto 1fr auto", alignItems: "flex-start", padding: "6px 8px"}}>
+                  <input type="checkbox" checked={c.done} onChange={() => onToggle(c.id)} disabled={readOnly} style={{accentColor: "var(--accent)", marginTop: 2}}/>
+                  <div>
+                    <span style={{textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--text-2)" : "var(--text)"}}>{c.text}</span>
+                    {c.due_date && (
+                      <div className="mono" style={{fontSize: 10, marginTop: 2, color: c.done ? "var(--text-3)" : isOverdueItem ? "var(--danger)" : "var(--text-3)", display: "flex", alignItems: "center", gap: 3}}>
+                        <Icon name="calendar" size={9}/>
+                        {c.due_date}
+                        {isOverdueItem && <span style={{background: "var(--danger)", color: "#fff", borderRadius: 3, padding: "0 4px", fontSize: 9, fontWeight: 600}}>VENCIDA</span>}
+                      </div>
+                    )}
+                  </div>
+                  {!readOnly && <button className="btn btn--sm" style={{color: "var(--danger)", border: "none", background: "transparent", padding: "2px 4px"}} onClick={() => onRemoveCheck(c.id)}><Icon name="x" size={11}/></button>}
+                </div>
+              );
+            })}
           </div>
-          {!readOnly && <div className="flex-c gap-8">
-            <input className="input" placeholder="Agregar ítem al checklist…" value={newCheck} onChange={e => setNewCheck(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheck(newCheck.trim()); setNewCheck(""); } }}/>
-            <button className="btn" onClick={() => { if (newCheck.trim()) { onAddCheck(newCheck.trim()); setNewCheck(""); } }}><Icon name="plus" size={14}/></button>
-          </div>}
+          {!readOnly && (
+            <div style={{display: "grid", gap: 6}}>
+              <div className="flex-c gap-8">
+                <input className="input" style={{flex: 1}} placeholder="Nombre de la subtarea…" value={newCheck} onChange={e => setNewCheck(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && newCheck.trim()) { onAddCheck({ text: newCheck.trim(), due_date: newCheckDue || null }); setNewCheck(""); setNewCheckDue(""); } }}/>
+                <input className="input mono" type="date" style={{width: 140, fontSize: 12}} value={newCheckDue} onChange={e => setNewCheckDue(e.target.value)} title="Fecha límite (opcional)"/>
+                <button className="btn" onClick={() => { if (newCheck.trim()) { onAddCheck({ text: newCheck.trim(), due_date: newCheckDue || null }); setNewCheck(""); setNewCheckDue(""); } }}><Icon name="plus" size={14}/></button>
+              </div>
+              <div className="dim" style={{fontSize: 10, paddingLeft: 2}}>Fecha límite es opcional · Enter para agregar</div>
+            </div>
+          )}
 
           {/* ─── NOTAS ─── */}
           <div className="divider"/>
