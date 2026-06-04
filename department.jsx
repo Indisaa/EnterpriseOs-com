@@ -199,6 +199,13 @@ function KPIPage({ session, deptScope, setDeptScope, kpis, setKpis, kpiWeekly, s
     return Math.min(12, Math.floor(days / 7));
   }, [year, quarter]);
 
+  const currentMonthIdx = useMemo(() => {
+    const now = new Date();
+    if (now.getFullYear() !== year) return -1;
+    const mi = now.getMonth() - (quarter - 1) * 3;
+    return mi >= 0 && mi < 3 ? mi : -1;
+  }, [year, quarter]);
+
   const deptGroups = useMemo(() => {
     if (effDept) return [D.DEPT_BY_ID[effDept]].filter(Boolean);
     return D.DEPARTMENTS;
@@ -257,7 +264,7 @@ function KPIPage({ session, deptScope, setDeptScope, kpis, setKpis, kpiWeekly, s
     const total = filled.reduce((s, v) => s + v, 0);
     const avg = filled.length ? total / filled.length : 0;
     const varSem = lastVal !== null ? lastVal - item.metaSemanal : null;
-    const varTrim = filled.length ? total - item.metaSemanal * 13 : null;
+    const varTrim = filled.length ? total - item.metaSemanal * item.semanas.length : null;
     const acum = total + (item.acumuladoPrevio || 0);
     const pct = lastVal !== null && item.metaSemanal > 0 ? (lastVal / item.metaSemanal) * 100 : null;
     return { lastVal, total, avg, varSem, varTrim, acum, pct };
@@ -415,12 +422,22 @@ function KPIPage({ session, deptScope, setDeptScope, kpis, setKpis, kpiWeekly, s
                             <NumCell value={item.metaSemanal} onCommit={v => updateMeta(dept.id, item.id, v)} readOnly={readOnly}
                               style={{ width: 72, textAlign: "right", fontSize: 12 }} />
                           </td>
-                          {item.semanas.map((v, wi) => (
-                            <td key={wi} className={"kpi-td kpi-td-wk " + cellCls(v, item.metaSemanal) + (wi === currentWeekIdx ? " kpi-td-now" : "")}>
-                              <NumCell value={v} onCommit={val => updateWeek(dept.id, item.id, wi, val)} readOnly={readOnly}
-                                style={{ width: 58, textAlign: "right", fontSize: 12 }} />
-                            </td>
-                          ))}
+                          {item.freq === "monthly" ? (
+                            [4, 4, 5].map((span, mi) => (
+                              <td key={mi} colSpan={span} className={"kpi-td kpi-td-wk " + cellCls(item.semanas[mi], item.metaSemanal) + (mi === currentMonthIdx ? " kpi-td-now" : "")}>
+                                <div style={{ fontSize: 9, color: "var(--text-3)", fontFamily: "var(--ff-mono)", lineHeight: 1.2 }}>M{mi + 1}</div>
+                                <NumCell value={item.semanas[mi]} onCommit={val => updateWeek(dept.id, item.id, mi, val)} readOnly={readOnly}
+                                  style={{ width: "100%", textAlign: "right", fontSize: 12 }} />
+                              </td>
+                            ))
+                          ) : (
+                            item.semanas.map((v, wi) => (
+                              <td key={wi} className={"kpi-td kpi-td-wk " + cellCls(v, item.metaSemanal) + (wi === currentWeekIdx ? " kpi-td-now" : "")}>
+                                <NumCell value={v} onCommit={val => updateWeek(dept.id, item.id, wi, val)} readOnly={readOnly}
+                                  style={{ width: 58, textAlign: "right", fontSize: 12 }} />
+                              </td>
+                            ))
+                          )}
                           <td className={"kpi-td kpi-td-calc mono " + (c.varSem !== null ? (c.varSem >= 0 ? "kpi-pos" : "kpi-neg") : "")}>
                             {c.varSem !== null ? (c.varSem >= 0 ? "+" : "") + fmtN(c.varSem) : "—"}
                           </td>
@@ -488,6 +505,7 @@ function KPIPage({ session, deptScope, setDeptScope, kpis, setKpis, kpiWeekly, s
 }
 
 function AddKpiWeeklyModal({ deptId, deptName, onClose, onAdd }) {
+  const isMonthly = deptId === "gg";
   const [label, setLabel] = useState("");
   const [tipo, setTipo] = useState("Cantidad");
   const [meta, setMeta] = useState("");
@@ -502,8 +520,9 @@ function AddKpiWeeklyModal({ deptId, deptName, onClose, onAdd }) {
       id,
       label: label.trim(),
       tipo,
+      freq: isMonthly ? "monthly" : "weekly",
       metaSemanal: parseFloat(meta),
-      semanas: Array(13).fill(null),
+      semanas: Array(isMonthly ? 3 : 13).fill(null),
       acumuladoPrevio: parseFloat(acumPrev) || 0,
     });
   }
@@ -516,6 +535,12 @@ function AddKpiWeeklyModal({ deptId, deptName, onClose, onAdd }) {
           <button className="iconbtn" onClick={onClose}><span className="ic"><Icon name="x" size={14} /></span></button>
         </div>
         <div className="modal__bd">
+          {isMonthly && (
+            <div className="alert" style={{ background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="info" size={13} />
+              <span>Gerencia General utiliza <b>periodicidad mensual</b> · 3 meses por trimestre</span>
+            </div>
+          )}
           <div className="field">
             <label>Nombre del indicador</label>
             <input className="input" placeholder="Ej. Producción Real" value={label} onChange={e => setLabel(e.target.value)} autoFocus />
@@ -528,7 +553,7 @@ function AddKpiWeeklyModal({ deptId, deptName, onClose, onAdd }) {
               </select>
             </div>
             <div className="field">
-              <label>Meta semanal</label>
+              <label>{isMonthly ? "Meta mensual" : "Meta semanal"}</label>
               <input className="input mono" type="number" step="1" placeholder="0" value={meta} onChange={e => setMeta(e.target.value)} />
             </div>
           </div>
@@ -539,7 +564,7 @@ function AddKpiWeeklyModal({ deptId, deptName, onClose, onAdd }) {
           {label && meta && (
             <div style={{ padding: "10px 12px", background: "var(--bg-1)", borderRadius: 8, border: "1px solid var(--line)", marginTop: 4, fontSize: 12 }}>
               <span style={{ fontWeight: 600 }}>{label}</span>
-              <span className="dim" style={{ marginLeft: 8 }}>· {tipo} · Meta: {meta}/sem · 13 semanas vacías</span>
+              <span className="dim" style={{ marginLeft: 8 }}>· {tipo} · Meta: {meta}/{isMonthly ? "mes" : "sem"} · {isMonthly ? "3 meses vacíos" : "13 semanas vacías"}</span>
             </div>
           )}
         </div>
