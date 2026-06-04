@@ -867,7 +867,6 @@ function ProjectModal({ p, onClose, onSave, onMove, onDelete, readOnly, tasks, s
               <button className="btn" onClick={() => { if (note.trim()) { const next=[...notes,{user:initials(session?.name||"yo"),text:note,ts:new Date().toLocaleString("es-CO",{dateStyle:"short",timeStyle:"short"})}]; setNotes(next); onSave({notes:next}); setNote(""); } }}><Icon name="arrow" size={14}/></button>
             </div>
           </div>
-        </div>
 
           {/* ─── DOCUMENTOS ADJUNTOS ─── */}
           <div className="divider"/>
