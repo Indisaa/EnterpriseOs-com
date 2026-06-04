@@ -211,9 +211,11 @@ function ProjectsPage({ session, deptScope, projects, setProjects, tasks, setTas
       {view === "timeline" && (
         <Card title={`Cronograma · Q${Math.ceil((new Date().getMonth()+1)/3)} ${new Date().getFullYear()}`} sub="duración estimada · 30 días por proyecto" headerExtra={
           <div className="legend-pills">
-            <span className="lp"><span className="sw" style={{background: "var(--danger)"}}/> Alta</span>
-            <span className="lp"><span className="sw" style={{background: "var(--warning)"}}/> Media</span>
-            <span className="lp"><span className="sw" style={{background: "var(--info)"}}/> Baja</span>
+            <span className="lp"><span className="sw" style={{background: "var(--info)"}}/> Por hacer</span>
+            <span className="lp"><span className="sw" style={{background: "var(--accent)"}}/> En curso</span>
+            <span className="lp"><span className="sw" style={{background: "var(--warning)"}}/> Revisión</span>
+            <span className="lp"><span className="sw" style={{background: "var(--positive)"}}/> Hecho</span>
+            <span className="lp"><span className="sw" style={{background: "#7c3aed"}}/> POA</span>
           </div>
         }>
           <Timeline items={filtered} onOpen={setOpen}/>
@@ -365,11 +367,13 @@ function Timeline({ items, onOpen }) {
     todo:   { chip: "chip--info",   lbl: "Por hacer" },
     backlog:{ chip: "chip--info",   lbl: "Por hacer" },
   };
-  // Bar color is driven by PRIORITY
-  const prioMap = {
-    high: { c: "var(--danger)",  lbl: "Alta" },
-    med:  { c: "var(--warning)", lbl: "Media" },
-    low:  { c: "var(--info)",    lbl: "Baja" },
+  // Bar color is driven by STATUS
+  const statusColorMap = {
+    todo:    "var(--info)",
+    backlog: "var(--info)",
+    doing:   "var(--accent)",
+    review:  "var(--warning)",
+    done:    "var(--positive)",
   };
 
   return (
@@ -404,7 +408,7 @@ function Timeline({ items, onOpen }) {
         const left = Math.max(0, rawLeft);
         const width = Math.max(3, Math.min(100, rawRight) - left);
         const st = statusMap[p.status] || statusMap.todo;
-        const pr = prioMap[p.prio] || prioMap.med;
+        const barColor = statusColorMap[p.status] || statusColorMap.todo;
         const dept = D.DEPT_BY_ID[p.dept];
         const daysLeft = Math.round((dueDate - today) / 86400000);
         const totalDays = Math.round((dueDate - sd) / 86400000);
@@ -426,9 +430,9 @@ function Timeline({ items, onOpen }) {
               </div>
               <div className="flex-c gap-6" style={{flexWrap: "wrap"}}>
                 <span className={"chip " + st.chip} style={{fontSize: 9}}><span className="dot"/>{st.lbl}</span>
-                <span className="flex-c gap-6" style={{fontSize: 10, color: "var(--text-2)"}}>
-                  <span className={"prio prio--" + p.prio}/> {p.prio === "high" ? "Alta" : p.prio === "med" ? "Media" : "Baja"}
-                </span>
+                {p.from_poa && (
+                  <span style={{fontSize:9,fontWeight:800,background:"#7c3aed",color:"#fff",padding:"2px 6px",borderRadius:3,textTransform:"uppercase",letterSpacing:".07em"}}>POA</span>
+                )}
                 <span className="dim mono" style={{fontSize: 10}}>· {dept?.short}</span>
                 <span style={{display: "inline-flex", marginLeft: 2}}>
                   {p.assignees.map((a, i) => (
@@ -451,7 +455,7 @@ function Timeline({ items, onOpen }) {
               <div style={{position: "absolute", left: `${left}%`, width: `${width}%`, top: 8, minWidth: 90}}>
                 <div style={{
                   height: 22, borderRadius: 6,
-                  background: pr.c,
+                  background: barColor,
                   opacity: 0.92, position: "relative", overflow: "hidden",
                   boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
                   display: "flex", alignItems: "center", padding: "0 8px",
